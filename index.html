@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conexo Clone</title>
+    <!-- Vue.js 2 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <style>
+        body { margin: 0; background: #0a0a0a; }
+        #app { font-family: 'Inter', system-ui, -apple-system, sans-serif; color: #fff; text-align: center; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+        
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; max-width: 550px; margin: 30px auto; }
+        .word-item { background: #1a1a1a; padding: 22px 5px; border-radius: 8px; cursor: pointer; transition: 0.2s; border: 1px solid #333; font-weight: bold; text-transform: uppercase; font-size: 0.9rem; }
+        .word-item:hover { border-color: #555; }
+        .word-item.selected { background: #2196f3; color: white; transform: translateY(-3px); box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4); border-color: transparent; }
+        
+        .group-banner { padding: 15px; margin: 10px auto; border-radius: 8px; max-width: 550px; text-align: left; animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        button { padding: 14px 28px; margin: 10px; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; font-family: inherit; }
+        button:active { transform: scale(0.98); }
+        
+        .success-btn { background: #4caf50; color: white; }
+        .exit-btn { background: #e53935; color: white; }
+        .guest-btn { background: #444; color: white; }
+        .logout-btn { background: transparent; color: #ff5252; border: 1px solid #ff5252; margin-top: 20px; }
+        .disabled-btn { background: #222 !important; color: #555 !important; cursor: not-allowed; }
+
+        input { background: #111; border: 1px solid #333; color: #fff; padding: 12px; margin: 10px auto; width: 280px; border-radius: 6px; display: block; font-family: inherit; }
+        
+        .feedback-msg { color: #ffeb3b; height: 20px; margin: 10px 0; }
+        .stats { color: #888; font-size: 0.9rem; }
+        
+        table { width: 100%; max-width: 550px; margin: 20px auto; border-collapse: collapse; }
+        th { border-bottom: 2px solid #333; padding: 15px; color: #888; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #1a1a1a; text-align: left; }
+
+        .mode-badge { background: #333; padding: 5px 12px; border-radius: 20px; font-size: 0.7rem; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <h1>Conexo Clone</h1>
+
+    <!-- TELA DE LOGIN / AUTH -->
+    <div v-if="!user && !isGuest" class="auth-container">
+        <h2>Entrar no Desafio</h2>
+        <input v-model="authData.username" placeholder="Usuário" />
+        <input v-model="authData.password" type="password" placeholder="Senha" />
+        <div class="auth-buttons">
+            <button @click="handleAuth('login')">Entrar</button>
+            <button @click="handleAuth('signup')">Cadastrar</button>
+            <button @click="isGuest = true" class="guest-btn">Modo Convidado</button>
+        </div>
+        <p v-if="feedback" class="feedback-msg">{{ feedback }}</p>
+    </div>
+
+    <!-- LEADERBOARD -->
+    <div v-else-if="showLeaderboard" class="leaderboard-view">
+        <h2>🏆 Ranking de Hoje ({{ hojeISO }})</h2>
+        <table v-if="rankings.length">
+            <thead>
+                <tr><th>Pos</th><th>Jogador</th><th>Erros</th><th>Tempo</th></tr>
+            </thead>
+            <tbody>
+                <tr v-for="(rank, i) in rankings" :key="i">
+                    <td>{{ i + 1 }}º</td>
+                    <td>{{ rank.username }}</td>
+                    <td>{{ rank.tentativas - 4 }}</td>
+                    <td>{{ rank.tempo_segundos }}s</td>
+                </tr>
+            </tbody>
+        </table>
+        <p v-else>Seja o primeiro a pontuar hoje!</p>
+        <button @click="showLeaderboard = false">Voltar ao Menu</button>
+    </div>
+
+    <!-- MENU PRINCIPAL -->
+    <div v-else-if="!modeSelected" class="mode-select">
+        <p v-if="user">Logado como: <strong>{{ user.username }}</strong></p>
+        <h2>Escolha o Modo</h2>
+        <button :disabled="hasPlayedDaily" @click="startGame('daily')" :class="{ 'disabled-btn': hasPlayedDaily }">
+            {{ hasPlayedDaily ? '✅ Diário Concluído' : '📅 Desafio Diário' }}
+        </button>
+        <button @click="startGame('infinite')">🔀 Modo Infinito</button>
+        <button @click="viewLeaderboard">🏆 Ver Ranking</button>
+        <br>
+        <button @click="logout" class="logout-btn">Sair</button>
+    </div>
+
+    <!-- TELA DE JOGO -->
+    <div v-else class="game-screen">
+        <div class="game-header">
+            <span class="mode-badge">{{ currentMode === 'daily' ? '📅 DIÁRIO' : '🔀 INFINITO' }}</span>
+            <button v-if="!gameWon" @click="returnToMenu" class="exit-btn">Desistir</button>
+            <button v-else @click="returnToMenu" class="success-btn">Voltar ao Menu</button>
+        </div>
+
+        <div v-if="words.length" class="grid">
+            <div v-for="word in words" :key="word" 
+                 class="word-item"
+                 :class="{ selected: selectedWords.includes(word) }"
+                 :style="{ backgroundColor: getWordColor(word) }"
+                 @click="toggleSelection(word)">
+                {{ word }}
+            </div>
+        </div>
+
+        <div class="game-ui">
+            <p class="feedback-msg">{{ feedback }}</p>
+            <p v-if="!gameWon" class="stats">Tentativas: {{ attempts }} | Tempo: {{ timer }}s</p>
+            <h2 v-else class="win-msg">🏆 Vitória em {{ timer }}s!</h2>
+        </div>
+
+        <div class="found-groups">
+            <div v-for="g in foundGroups" :key="g.categoria" class="group-banner" :style="{ backgroundColor: g.color }">
+                <strong>{{ g.categoria }}</strong>: {{ g.palavras.join(', ') }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+new Vue({
+    el: '#app',
+    data() {
+        return {
+            apiBase: 'http://127.0.0.1:8000/api', //precisa alterar para uma aplicação real
+            user: null, 
+            isGuest: false,
+            authData: { username: '', password: '' },
+            allWords: [], 
+            groups: [], 
+            selectedWords: [], 
+            foundGroups: [],
+            modeSelected: false, 
+            currentMode: '', 
+            gameWon: false,
+            attempts: 0, 
+            timer: 0, 
+            timerInterval: null,
+            feedback: '', 
+            showLeaderboard: false, 
+            rankings: [],
+            hasPlayedDaily: false,
+            hojeISO: new Date().toISOString().split('T')[0]
+        };
+    },
+    computed: {
+        words() { 
+            return this.allWords.filter(w => !this.foundGroups.some(g => g.palavras.includes(w))); 
+        }
+    },
+    methods: {
+        async handleAuth(type) {
+            try {
+                const res = await fetch(`${this.apiBase}/auth/${type}`, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.authData)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    if (type === 'login') {
+                        this.user = { username: data.username, id: data.user_id };
+                        await this.checkDailyStatus();
+                    }
+                    this.feedback = type === 'login' ? 'Bem-vindo!' : 'Criado! Faça login.';
+                } else { 
+                    this.feedback = data.detail || 'Erro na autenticação'; 
+                }
+            } catch (e) { 
+                this.feedback = 'Erro de conexão com o servidor.'; 
+            }
+            setTimeout(() => this.feedback = '', 3000);
+        },
+
+        async checkDailyStatus() {
+            if (!this.user) return;
+            try {
+                const res = await fetch(`${this.apiBase}/leaderboard/check?usuario_id=${this.user.id}&data=${this.hojeISO}`);
+                const data = await res.json();
+                this.hasPlayedDaily = data.played;
+            } catch (e) { console.error("Erro ao checar status diário"); }
+        },
+
+        async startGame(mode) {
+            if (mode === 'daily' && this.hasPlayedDaily) return;
+            this.resetGameState();
+            this.currentMode = mode;
+            
+            try {
+                const endpoint = mode === 'daily' ? 'puzzles/daily' : 'puzzles/infinite';
+                const res = await fetch(`${this.apiBase}/${endpoint}`);
+                const result = await res.json();
+                
+                if (res.ok) {
+                    this.groups = result.data;
+                    this.allWords = this.groups.flatMap(g => g.palavras);
+                    this.shuffleArray(this.allWords);
+                    this.modeSelected = true;
+                    this.startTimer();
+                }
+            } catch (e) { 
+                alert('Erro ao carregar palavras. O servidor está rodando?'); 
+            }
+        },
+
+        shuffleArray(array) {
+            let m = array.length, t, i;
+            while (m) {
+                i = Math.floor(Math.random() * m--);
+                t = array[m];
+                array[m] = array[i];
+                array[i] = t;
+            }
+            if (this.isTooEasy(array)) return this.shuffleArray(array);
+        },
+
+        isTooEasy(shuffled) {
+            for (let i = 0; i < shuffled.length; i += 4) {
+                const row = shuffled.slice(i, i + 4);
+                for (const group of this.groups) {
+                    const matches = row.filter(w => group.palavras.includes(w)).length;
+                    if (matches >= 3) return true;
+                }
+            }
+            return false;
+        },
+
+        toggleSelection(word) {
+            if (this.gameWon) return;
+            if (this.selectedWords.includes(word)) {
+                this.selectedWords = this.selectedWords.filter(w => w !== word);
+            } else if (this.selectedWords.length < 4) {
+                this.selectedWords.push(word);
+                if (this.selectedWords.length === 4) {
+                    // Pequeno delay para o usuário ver a 4ª seleção
+                    setTimeout(() => this.checkGroup(), 200);
+                }
+            }
+        },
+
+        checkGroup() {
+            this.attempts++;
+            const found = this.groups.find(g => g.palavras.every(w => this.selectedWords.includes(w)));
+            
+            if (found && !this.foundGroups.some(f => f.categoria === found.categoria)) {
+                this.foundGroups.push({ 
+                    ...found, 
+                    color: `hsl(${Math.random() * 360}, 60%, 35%)` 
+                });
+                if (this.foundGroups.length === 4) this.finishGame();
+            } else {
+                this.feedback = '❌ Grupo Incorreto';
+                setTimeout(() => this.feedback = '', 800);
+            }
+            this.selectedWords = [];
+        },
+
+        async finishGame() {
+            clearInterval(this.timerInterval);
+            this.gameWon = true;
+            if (this.currentMode === 'daily' && this.user) {
+                try {
+                    await fetch(`${this.apiBase}/leaderboard/submit`, {
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            usuario_id: this.user.id, 
+                            username: this.user.username,
+                            puzzle_data: this.hojeISO, 
+                            tentativas: this.attempts,
+                            tempo_segundos: this.timer, 
+                            vitoria: true
+                        })
+                    });
+                    this.hasPlayedDaily = true;
+                } catch (e) { console.error("Erro ao salvar pontuação"); }
+            }
+        },
+
+        async viewLeaderboard() {
+            try {
+                const res = await fetch(`${this.apiBase}/leaderboard?data=${this.hojeISO}`);
+                this.rankings = await res.json();
+                this.showLeaderboard = true;
+            } catch (e) { alert("Não foi possível carregar o ranking."); }
+        },
+
+        resetGameState() {
+            this.allWords = []; this.foundGroups = []; this.selectedWords = [];
+            this.attempts = 0; this.timer = 0; this.gameWon = false;
+            clearInterval(this.timerInterval);
+        },
+        returnToMenu() { this.modeSelected = false; this.resetGameState(); },
+        startTimer() { this.timerInterval = setInterval(() => this.timer++, 1000); },
+        logout() { 
+            this.user = null; this.isGuest = false; 
+            this.hasPlayedDaily = false; this.returnToMenu(); 
+        },
+        getWordColor(word) {
+            const g = this.foundGroups.find(g => g.palavras.includes(word));
+            return g ? g.color : '';
+        }
+    }
+});
+</script>
+</body>
+</html>
